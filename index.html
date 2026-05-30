@@ -10,6 +10,8 @@
 <title>Taskly · Professional Job Manager</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -140,6 +142,28 @@ button,input,textarea,select{font-family:inherit;-webkit-appearance:none;appeara
 .status-cancelled{background:var(--rd)}
 
 .empty-state{text-align:center;padding:40px 20px;color:var(--mu)}
+.home-cal{margin:0 20px 20px;background:var(--sf1);border:1px solid var(--bd);border-radius:20px;padding:16px}
+.cal-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.cal-month{font-family:var(--font-head);font-size:15px;font-weight:700}
+.cal-nav{width:28px;height:28px;border-radius:8px;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+.cal-dow{text-align:center;font-size:10px;font-weight:700;color:var(--mu2);letter-spacing:.3px;padding:4px 0;text-transform:uppercase}
+.cal-day{aspect-ratio:1;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;position:relative;transition:background .12s}
+.cal-day-num{font-size:12px;font-weight:600;line-height:1}
+.cal-day.today .cal-day-num{color:var(--ac)}
+.cal-day.today{border:1.5px solid var(--ac)}
+.cal-day.has-pending{background:rgba(245,200,66,.15)}
+.cal-day.has-pending .cal-day-num{color:var(--yw);font-weight:700}
+.cal-day.has-done{background:rgba(34,211,160,.12)}
+.cal-day.has-done .cal-day-num{color:var(--gr);font-weight:700}
+.cal-day.has-both{background:linear-gradient(135deg,rgba(245,200,66,.15),rgba(34,211,160,.12))}
+.cal-day.has-both .cal-day-num{color:var(--yw);font-weight:700}
+.cal-day.empty{cursor:default}
+.cal-dot-row{display:flex;gap:2px;margin-top:2px}
+.cal-dot{width:4px;height:4px;border-radius:50%}
+.cal-legend{display:flex;gap:12px;margin-top:10px;justify-content:center}
+.cal-leg{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--mu)}
+.cal-leg-dot{width:8px;height:8px;border-radius:50%}
 .empty-state i{font-size:40px;display:block;margin-bottom:12px;opacity:.3}
 .empty-state p{font-size:14px}
 
@@ -291,6 +315,9 @@ button,input,textarea,select{font-family:inherit;-webkit-appearance:none;appeara
 
 /* ── UTILS ── */
 .badge{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:100px;font-size:11px;font-weight:700}
+.jd-map{height:200px;border-radius:14px;overflow:hidden;margin:0 24px 16px;border:1px solid var(--bd);position:relative}
+.jd-map-placeholder{height:200px;background:var(--sf2);border-radius:14px;margin:0 24px 16px;border:1px solid var(--bd);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;color:var(--mu);font-size:13px}
+.map-nav-btn{display:flex;align-items:center;justify-content:center;gap:6px;width:calc(100% - 48px);margin:0 24px 16px;padding:12px;background:var(--ac2);border:1px solid var(--ac3);border-radius:12px;color:var(--ac);font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font-head)}
 .badge-pro{background:var(--yw2);color:var(--yw);border:1px solid rgba(245,200,66,.2)}
 </style>
 </head>
@@ -550,6 +577,7 @@ var GROQ_KEY = (function(){
 
 // ── STATE ──
 var USER = null, CU = null, JOBS = [], INV_ITEMS = [], CHAT = [], curPage = 'home';
+var calMonth = new Date();
 var selectedDate = new Date(), jobEditId = null, jobType = 'cctv';
 
 // ── INIT ──
@@ -683,6 +711,72 @@ function navTo(page) {
 function scrollTop(id){var el=document.getElementById(id);if(el)el.scrollTop=0;}
 
 // ── HOME PAGE ──
+
+function buildHomeCalendar(){
+  var now = new Date();
+  var cm = calMonth;
+  var year = cm.getFullYear();
+  var month = cm.getMonth();
+  var monthNames=['January','February','March','April','May','June','July','August','September','October','November','December'];
+  var dows=['Su','Mo','Tu','We','Th','Fr','Sa'];
+  var firstDay = new Date(year,month,1).getDay();
+  var daysInMonth = new Date(year,month+1,0).getDate();
+  var todayStr = dateStr(now);
+
+  // Build job map for this month
+  var jobMap={};
+  JOBS.forEach(function(j){
+    if(!j.date) return;
+    var d=new Date(j.date+'T12:00:00');
+    if(d.getMonth()===month&&d.getFullYear()===year&&j.status!=='cancelled'){
+      if(!jobMap[j.date]) jobMap[j.date]={pending:0,done:0};
+      if(j.status==='done') jobMap[j.date].done++;
+      else jobMap[j.date].pending++;
+    }
+  });
+
+  var dowsHTML = dows.map(function(d){return '<div class="cal-dow">'+d+'</div>';}).join('');
+  var blanks = '';
+  for(var i=0;i<firstDay;i++) blanks+='<div class="cal-day empty"></div>';
+
+  var daysHTML='';
+  for(var d=1;d<=daysInMonth;d++){
+    var ds=year+'-'+String(month+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
+    var jd=jobMap[ds];
+    var cls='cal-day';
+    var dots='';
+    if(ds===todayStr) cls+=' today';
+    if(jd){
+      if(jd.pending>0&&jd.done>0){ cls+=' has-both'; dots='<div class="cal-dot-row"><div class="cal-dot" style="background:var(--yw)"></div><div class="cal-dot" style="background:var(--gr)"></div></div>'; }
+      else if(jd.pending>0){ cls+=' has-pending'; dots='<div class="cal-dot-row"><div class="cal-dot" style="background:var(--yw)"></div></div>'; }
+      else if(jd.done>0){ cls+=' has-done'; dots='<div class="cal-dot-row"><div class="cal-dot" style="background:var(--gr)"></div></div>'; }
+    }
+    daysHTML+='<div class="'+cls+'" onclick="calDayClick(\''+ds+'\')"><div class="cal-day-num">'+d+'</div>'+dots+'</div>';
+  }
+
+  return '<div class="home-cal">'
+    +'<div class="cal-hdr">'
+    +'<div class="cal-nav" onclick="shiftCalMonth(-1)"><i class="ti ti-chevron-left"></i></div>'
+    +'<div class="cal-month">'+monthNames[month]+' '+year+'</div>'
+    +'<div class="cal-nav" onclick="shiftCalMonth(1)"><i class="ti ti-chevron-right"></i></div>'
+    +'</div>'
+    +'<div class="cal-grid">'+dowsHTML+blanks+daysHTML+'</div>'
+    +'<div class="cal-legend">'
+    +'<div class="cal-leg"><div class="cal-leg-dot" style="background:var(--yw)"></div>Pending</div>'
+    +'<div class="cal-leg"><div class="cal-leg-dot" style="background:var(--gr)"></div>Completed</div>'
+    +'</div></div>';
+}
+
+function shiftCalMonth(dir){
+  calMonth=new Date(calMonth.getFullYear(), calMonth.getMonth()+dir, 1);
+  renderHome();
+}
+
+function calDayClick(ds){
+  agendaDate=new Date(ds+'T12:00:00');
+  navTo('agenda');
+}
+
 function renderHome() {
   var pg = document.getElementById('page-home');
   var now = new Date();
@@ -713,7 +807,9 @@ function renderHome() {
     +'<div class="hero-stat"><div class="hero-stat-val" style="color:var(--yw)">'+monthJobs.filter(function(j){return j.status==='pending'||j.status==='confirmed';}).length+'</div><div class="hero-stat-lbl">Upcoming</div></div>'
     +'</div></div>'
     +'<div class="sec-hdr"><div class="sec-title">Today\'s Schedule</div><button class="sec-action" onclick="navTo(\'agenda\')">See all</button></div>'
-    +'<div class="jobs-today">'+jobsHTML+'</div>';
+    +'<div class="jobs-today">'+jobsHTML+'</div>'
+    +'<div class="sec-hdr"><div class="sec-title">Monthly Calendar</div></div>'
+    +buildHomeCalendar();
 }
 
 function jobCardHTML(j) {
@@ -978,6 +1074,8 @@ function openJobDetail(id) {
     '<div class="jd-info" style="grid-column:1/-1"><div class="jd-info-lbl">Address</div><div class="jd-info-val" style="font-size:13px">'+esc(j.address||'No address')+'</div></div>'+
     '<div class="jd-info" style="grid-column:1/-1"><div class="jd-info-lbl">Status</div><div class="jd-info-val" style="color:'+statusColors[j.status||'pending']+'">'+statusLabels[j.status||'pending']+'</div></div>'+
     (j.notes?'<div class="jd-info" style="grid-column:1/-1"><div class="jd-info-lbl">Notes</div><div class="jd-info-val" style="font-size:13px;color:var(--mu)">'+esc(j.notes)+'</div></div>':'')+'</div>'+
+    (j.address ? '<div id="jd-map-container"></div>' : '') +
+    (j.address ? '<button class="map-nav-btn" onclick="openMapsNav(\''+esc(j.address||'')+'\')"><i class="ti ti-navigation"></i>Open in Maps</button>' : '') +
     '<div class="jd-actions">'+
     (j.status!=='done'?'<button class="jd-act-btn jd-done-btn" onclick="markDone(\''+id+'\')"><i class="ti ti-check"></i>Mark as Completed</button>':'<button class="jd-act-btn" style="background:var(--gr2);color:var(--gr)" disabled><i class="ti ti-check"></i>Completed</button>')+
     '<button class="jd-act-btn jd-inv-btn" onclick="quickInvoice(\''+id+'\')"><i class="ti ti-file-invoice"></i>Create Invoice</button>'+
@@ -986,6 +1084,48 @@ function openJobDetail(id) {
     '<button class="jd-act-btn" style="background:var(--sf2);color:var(--mu)" onclick="closeModal(\'jobdetail\')">Close</button>'+
     '</div>';
   openModal('jobdetail');
+  if(j.address){
+    setTimeout(function(){ initJobMap(j.address); }, 300);
+  }
+}
+
+function initJobMap(address){
+  var container = document.getElementById('jd-map-container');
+  if(!container) return;
+  container.className='jd-map';
+  container.id='jd-map-el';
+  // Geocode with Nominatim (OpenStreetMap)
+  fetch('https://nominatim.openstreetmap.org/search?format=json&q='+encodeURIComponent(address)+'&limit=1')
+    .then(function(r){return r.json();})
+    .then(function(data){
+      if(!data||!data[0]){
+        container.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--mu);font-size:13px;flex-direction:column;gap:6px"><i class="ti ti-map-off" style="font-size:28px;opacity:.3"></i>Address not found</div>';
+        return;
+      }
+      var lat=parseFloat(data[0].lat);
+      var lon=parseFloat(data[0].lon);
+      if(window._jobMap){ window._jobMap.remove(); window._jobMap=null; }
+      var map=L.map('jd-map-el',{zoomControl:false,attributionControl:false}).setView([lat,lon],15);
+      window._jobMap=map;
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+      var icon=L.divIcon({html:'<div style="background:var(--ac);width:24px;height:24px;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center"><i class="ti ti-map-pin" style="color:#fff;font-size:12px"></i></div>',className:'',iconSize:[24,24],iconAnchor:[12,12]});
+      L.marker([lat,lon],{icon:icon}).addTo(map);
+      L.control.zoom({position:'bottomright'}).addTo(map);
+    })
+    .catch(function(){
+      container.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--mu);font-size:13px">Map unavailable</div>';
+    });
+}
+
+function openMapsNav(address){
+  var ua=navigator.userAgent;
+  var url;
+  if(/iPhone|iPad|iPod/.test(ua)){
+    url='maps://maps.apple.com/?daddr='+encodeURIComponent(address);
+  } else {
+    url='https://www.google.com/maps/dir/?api=1&destination='+encodeURIComponent(address);
+  }
+  window.open(url,'_blank');
 }
 
 function markDone(id) {
