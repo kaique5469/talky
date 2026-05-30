@@ -496,8 +496,21 @@ button,input,textarea,select{font-family:inherit;-webkit-appearance:none;appeara
       </div>
       <div class="mf-row">
         <div class="mf"><label>Duration (hrs)</label><input id="nj-dur" type="number" placeholder="2" min="0.5" step="0.5"></div>
-        <div class="mf"><label>Value ($)</label><input id="nj-val" type="number" placeholder="350" min="0"></div>
+        <div class="mf"><label>Total Value ($)</label><input id="nj-val" type="number" placeholder="350" min="0" oninput="updateDepositMax()"></div>
       </div>
+      <div class="mf-row">
+        <div class="mf"><label>Deposit Received ($)</label><input id="nj-deposit" type="number" placeholder="0" min="0" step="0.01"></div>
+        <div class="mf"><label>Balance Due ($)</label><input id="nj-balance" type="number" placeholder="0" min="0" step="0.01" readonly style="opacity:.6"></div>
+      </div>
+      <div class="mf">
+        <label>Payment Status</label>
+        <div class="type-chips" id="nj-pay-chips">
+          <div class="type-chip on" data-v="unpaid">Unpaid</div>
+          <div class="type-chip" data-v="partial">Partial</div>
+          <div class="type-chip" data-v="paid">Paid</div>
+        </div>
+      </div>
+      <div class="mf"><label>Client Email (for invoice)</label><input id="nj-email" type="email" placeholder="client@email.com"></div>
       <div class="mf">
         <label>Service Type</label>
         <div class="type-chips" id="nj-type-chips">
@@ -791,7 +804,13 @@ function openNewJob(prefillDate) {
   document.getElementById('nj-time').value='09:00';
   document.getElementById('nj-dur').value='2';
   document.getElementById('nj-val').value='';
+  document.getElementById('nj-deposit').value='';
+  document.getElementById('nj-balance').value='';
+  document.getElementById('nj-email').value='';
   document.getElementById('nj-notes').value='';
+  payStatus='unpaid';
+  document.querySelectorAll('#nj-pay-chips .type-chip').forEach(function(c){c.classList.remove('on');});
+  var defPay=document.querySelector('#nj-pay-chips [data-v="unpaid"]');if(defPay)defPay.classList.add('on');
   document.querySelectorAll('#nj-type-chips .type-chip').forEach(function(c){c.classList.remove('on');});
   var def=document.querySelector('#nj-type-chips [data-v="cctv"]');if(def)def.classList.add('on');
   openModal('newjob');
@@ -805,6 +824,29 @@ document.querySelectorAll('#nj-type-chips .type-chip').forEach(function(c){
   });
 });
 
+function updateDepositMax(){
+  var val=parseFloat(document.getElementById('nj-val').value)||0;
+  var dep=parseFloat(document.getElementById('nj-deposit').value)||0;
+  document.getElementById('nj-balance').value=(val-dep).toFixed(2);
+}
+
+document.addEventListener('DOMContentLoaded',function(){
+  var depEl=document.getElementById('nj-deposit');
+  if(depEl) depEl.addEventListener('input',updateDepositMax);
+});
+
+var payStatus='unpaid';
+document.querySelectorAll('#nj-pay-chips .type-chip').forEach(function(c){
+  c.addEventListener('click',function(){
+    document.querySelectorAll('#nj-pay-chips .type-chip').forEach(function(x){x.classList.remove('on');});
+    c.classList.add('on');
+    payStatus=c.getAttribute('data-v');
+    var val=parseFloat(document.getElementById('nj-val').value)||0;
+    if(payStatus==='paid'){ document.getElementById('nj-deposit').value=val; document.getElementById('nj-balance').value='0.00'; }
+    else if(payStatus==='unpaid'){ document.getElementById('nj-deposit').value=''; document.getElementById('nj-balance').value=val.toFixed(2); }
+  });
+});
+
 function saveJob() {
   var title=document.getElementById('nj-title').value.trim();
   var client=document.getElementById('nj-client').value.trim();
@@ -813,9 +855,12 @@ function saveJob() {
   var time=document.getElementById('nj-time').value;
   var dur=parseFloat(document.getElementById('nj-dur').value)||2;
   var val=parseFloat(document.getElementById('nj-val').value)||0;
+  var deposit=parseFloat(document.getElementById('nj-deposit').value)||0;
+  var balance=val-deposit;
+  var email=document.getElementById('nj-email').value.trim();
   var notes=document.getElementById('nj-notes').value.trim();
   if(!title||!date) return toast('Please add a title and date');
-  var data={user_id:CU.id,title:title,client_name:client,address:addr,date:date,time:time,duration:dur,value:val,notes:notes,job_type:jobType,status:'pending'};
+  var data={user_id:CU.id,title:title,client_name:client,address:addr,date:date,time:time,duration:dur,value:val,deposit:deposit,balance:balance,client_email:email,notes:notes,job_type:jobType,pay_status:payStatus,status:'pending'};
   if(jobEditId) {
     sb.from('taskly_jobs').update(data).eq('id',jobEditId).select().then(function(r){
       if(!r.error&&r.data){
@@ -826,11 +871,88 @@ function saveJob() {
   } else {
     sb.from('taskly_jobs').insert(data).select().then(function(r){
       if(!r.error&&r.data){
-        JOBS.push(r.data[0]);
-        closeModal('newjob'); toast('Job added!'); refreshCurPage();
+        var job=r.data[0];
+        JOBS.push(job);
+        closeModal('newjob');
+        toast('Job saved! Generating invoice...');
+        refreshCurPage();
+        setTimeout(function(){ autoGenerateInvoice(job); }, 600);
       }
     });
   }
+}
+
+function autoGenerateInvoice(j){
+  var val=parseFloat(j.value)||0;
+  var deposit=parseFloat(j.deposit)||0;
+  var balance=parseFloat(j.balance)||val;
+  var invNum='INV-'+new Date().getFullYear()+String(new Date().getMonth()+1).padStart(2,'0')+String(new Date().getDate()).padStart(2,'0')+'-'+Math.floor(Math.random()*900+100);
+  var profName=USER.name||'Professional';
+  var profPhone=USER.phone||'';
+  var profCity=USER.city||'';
+  var payNote='';
+  if(deposit>0&&balance>0) payNote='Deposit received: $'+deposit.toFixed(2)+'. Balance due: $'+balance.toFixed(2)+'.';
+  else if(deposit>=val&&val>0) payNote='Paid in full. Thank you!';
+  else payNote='Payment due upon completion.';
+
+  var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'+invNum+'</title>'
+    +'<style>*{box-sizing:border-box}body{font-family:Georgia,serif;margin:0;padding:0;color:#111;background:#fff}'
+    +'.page{max-width:800px;margin:0 auto;padding:48px 40px}'
+    +'h1{font-size:40px;font-weight:900;letter-spacing:-2px;margin:0}'
+    +'.header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:48px;padding-bottom:24px;border-bottom:3px solid #111}'
+    +'.inv-num{font-size:28px;font-weight:800;margin-top:8px;color:#111}'
+    +'.label{font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:#888;margin-bottom:4px;font-family:Arial,sans-serif}'
+    +'.bill-grid{display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-bottom:40px}'
+    +'.bill-box{padding:20px;background:#f8f8f8;border-radius:8px}'
+    +'.bill-name{font-size:16px;font-weight:700;margin-bottom:4px}'
+    +'table{width:100%;border-collapse:collapse;margin-bottom:32px}'
+    +'th{background:#111;color:#fff;padding:12px 16px;text-align:left;font-size:12px;letter-spacing:.5px;text-transform:uppercase;font-family:Arial,sans-serif}'
+    +'th:last-child{text-align:right}'
+    +'td{padding:14px 16px;border-bottom:1px solid #eee;font-size:15px}'
+    +'td:last-child{text-align:right;font-weight:600}'
+    +'.summary{margin-left:auto;width:280px}'
+    +'.sum-row{display:flex;justify-content:space-between;padding:8px 0;font-size:14px;border-bottom:1px solid #eee}'
+    +'.sum-total{display:flex;justify-content:space-between;padding:14px 0;font-size:20px;font-weight:800;border-top:3px solid #111;margin-top:4px}'
+    +'.pay-note{margin-top:24px;padding:16px 20px;background:#f0faf5;border-left:4px solid #22c55e;border-radius:4px;font-size:14px}'
+    +'.footer{margin-top:48px;padding-top:20px;border-top:1px solid #eee;font-size:12px;color:#aaa;text-align:center;font-family:Arial,sans-serif}'
+    +'@media print{.page{padding:0}}'
+    +'</style></head><body><div class="page">'
+    +'<div class="header">'
+    +'<div><h1>Taskly</h1><div style="font-size:13px;color:#888;margin-top:4px;font-family:Arial">Professional Services</div>'
+    +'<div style="margin-top:20px"><div class="label">From</div><div class="bill-name">'+esc(profName)+'</div>'
+    +(profPhone?'<div style="font-size:13px;color:#666">'+esc(profPhone)+'</div>':'')
+    +(profCity?'<div style="font-size:13px;color:#666">'+esc(profCity)+'</div>':'')+'</div></div>'
+    +'<div style="text-align:right"><div class="label">Invoice</div><div class="inv-num">#'+invNum+'</div>'
+    +'<div style="margin-top:12px"><div class="label">Date</div><div style="font-size:14px">'+fDate(j.date)+'</div></div>'
+    +'<div style="margin-top:8px"><div class="label">Status</div>'
+    +'<div style="font-size:13px;font-weight:700;color:'+(balance<=0?'#16a34a':deposit>0?'#d97706':'#dc2626')+'">'+(balance<=0?'PAID IN FULL':deposit>0?'PARTIALLY PAID':'PAYMENT DUE')+'</div>'
+    +'</div></div></div>'
+    +'<div class="bill-grid">'
+    +'<div class="bill-box"><div class="label">Bill To</div><div class="bill-name">'+esc(j.client_name||'Client')+'</div>'
+    +(j.client_email?'<div style="font-size:13px;color:#666">'+esc(j.client_email)+'</div>':'')
+    +(j.address?'<div style="font-size:13px;color:#666;margin-top:4px">'+esc(j.address)+'</div>':'')+'</div>'
+    +'<div class="bill-box"><div class="label">Job Details</div>'
+    +'<div style="font-size:13px;margin-top:4px"><strong>Date:</strong> '+fDate(j.date)+'</div>'
+    +(j.time?'<div style="font-size:13px"><strong>Time:</strong> '+j.time+'</div>':'')
+    +(j.duration?'<div style="font-size:13px"><strong>Duration:</strong> '+j.duration+'h</div>':'')
+    +'</div></div>'
+    +'<table><thead><tr><th>Description</th><th>Type</th><th style="text-align:right">Amount</th></tr></thead><tbody>'
+    +'<tr><td>'+esc(j.title)+'</td><td style="color:#666;font-size:13px">'+(j.job_type==='cctv'?'CCTV':j.job_type==='install'?'Installation':j.job_type==='repair'?'Repair':'Service')+'</td><td>$'+val.toFixed(2)+'</td></tr>'
+    +'</tbody></table>'
+    +'<div class="summary">'
+    +(deposit>0?'<div class="sum-row"><span>Subtotal</span><span>$'+val.toFixed(2)+'</span></div><div class="sum-row"><span style="color:#16a34a">Deposit Received</span><span style="color:#16a34a">-$'+deposit.toFixed(2)+'</span></div>':'')
+    +'<div class="sum-total"><span>'+(balance<=0?'Total Paid':'Balance Due')+'</span><span>$'+(balance<=0?val:balance).toFixed(2)+'</span></div></div>'
+    +'<div class="pay-note">'+payNote+'</div>'
+    +(j.notes?'<div style="margin-top:24px;padding:16px;background:#f9f9f9;border-radius:6px;font-size:13px;color:#666"><strong>Notes:</strong> '+esc(j.notes)+'</div>':'')
+    +'<div class="footer">Generated by Taskly &middot; Professional Job Manager &middot; Thank you for your business!</div>'
+    +'</div></body></html>';
+
+  var blob=new Blob([html],{type:'text/html'});
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement('a');
+  a.href=url;a.download=invNum+'.html';a.click();
+  URL.revokeObjectURL(url);
+  toast('Invoice downloaded! Open in browser → Print → Save as PDF');
 }
 
 // ── JOB DETAIL ──
@@ -887,7 +1009,12 @@ function editJob(id) {
   document.getElementById('nj-time').value=j.time||'09:00';
   document.getElementById('nj-dur').value=j.duration||2;
   document.getElementById('nj-val').value=j.value||'';
+  document.getElementById('nj-deposit').value=j.deposit||'';
+  document.getElementById('nj-balance').value=j.balance!=null?j.balance:'';
+  document.getElementById('nj-email').value=j.client_email||'';
   document.getElementById('nj-notes').value=j.notes||'';
+  payStatus=j.pay_status||'unpaid';
+  document.querySelectorAll('#nj-pay-chips .type-chip').forEach(function(c){c.classList.toggle('on',c.getAttribute('data-v')===payStatus);});
   document.querySelectorAll('#nj-type-chips .type-chip').forEach(function(c){
     c.classList.toggle('on',c.getAttribute('data-v')===jobType);
   });
