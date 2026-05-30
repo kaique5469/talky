@@ -570,11 +570,7 @@ button,input,textarea,select{font-family:inherit;-webkit-appearance:none;appeara
 var SUPA_URL = 'https://nxtolmtfnyrlvewjtdwy.supabase.co';
 var SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im54dG9sbXRmbnlybHZld2p0ZHd5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk0OTkyMDAsImV4cCI6MjA5NTA3NTIwMH0.zMhKvx7_Y5ES7WMFTQJ1mpPlZTENaGDXKULBS08Ig-Q';
 var sb = supabase.createClient(SUPA_URL, SUPA_KEY);
-var GROQ_KEY = (function(){
-  var k = localStorage.getItem('taskly_groq_key');
-  if(!k){ k = prompt('Enter your Groq API key to enable AI features (get it free at console.groq.com):',''); if(k) localStorage.setItem('taskly_groq_key', k); }
-  return k || '';
-})();
+var GROQ_KEY = localStorage.getItem('taskly_groq_key') || '';
 
 // ── STATE ──
 var USER = null, CU = null, JOBS = [], INV_ITEMS = [], CHAT = [], curPage = 'home';
@@ -1499,8 +1495,29 @@ function renderProfile() {
     '<div class="prof-item" onclick="navTo(\'financial\')"><div class="prof-item-ico" style="background:var(--gr2);color:var(--gr)"><i class="ti ti-chart-bar"></i></div><div class="prof-item-body"><div class="prof-item-name">Financial Report</div><div class="prof-item-sub">Earnings and job stats</div></div><i class="ti ti-chevron-right"></i></div>'+
     '</div>'+
     '<div class="prof-section">'+
+    '<div class="prof-item" style="flex-direction:column;align-items:flex-start;gap:10px;cursor:default">'+
+    '<div style="display:flex;align-items:center;gap:10px;width:100%">'+
+    '<div class="prof-item-ico" style="background:var(--pu2);color:var(--pu)"><i class="ti ti-robot"></i></div>'+
+    '<div class="prof-item-body"><div class="prof-item-name">Groq AI Key</div><div class="prof-item-sub">Required for AI Assistant</div></div>'+
+    '<div id="ai-key-status" style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:100px;background:'+(localStorage.getItem('taskly_groq_key')?'var(--gr2)':'var(--rd2)')+';color:'+(localStorage.getItem('taskly_groq_key')?'var(--gr)':'var(--rd)')+'">'+( localStorage.getItem('taskly_groq_key')?'Active':'Not set')+'</div></div>'+
+    '<div style="display:flex;gap:8px;width:100%">'+
+    '<input id="groq-key-inp" type="password" placeholder="gsk_..." style="flex:1;padding:10px 12px;background:var(--sf2);border:1.5px solid var(--bd2);border-radius:10px;color:var(--tx);font-size:13px;outline:none;font-family:inherit" value="'+(localStorage.getItem('taskly_groq_key')||'')+'">'+
+    '<button onclick="saveGroqKey()" style="padding:10px 16px;background:var(--pu);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font-head)">Save</button>'+
+    '</div></div>'+
+    '</div>'+
+    '<div class="prof-section">'+
     '<div class="prof-item" onclick="doLogout()"><div class="prof-item-ico" style="background:var(--rd2);color:var(--rd)"><i class="ti ti-logout"></i></div><div class="prof-item-body"><div class="prof-item-name" style="color:var(--rd)">Sign Out</div><div class="prof-item-sub">'+( CU&&CU.email||'')+'</div></div></div>'+
     '</div>';
+}
+
+function saveGroqKey(){
+  var key=document.getElementById('groq-key-inp').value.trim();
+  if(!key) return toast('Please enter your Groq API key');
+  localStorage.setItem('taskly_groq_key',key);
+  GROQ_KEY=key;
+  var status=document.getElementById('ai-key-status');
+  if(status){status.textContent='Active';status.style.background='var(--gr2)';status.style.color='var(--gr)';}
+  toast('AI key saved! ✓');
 }
 
 function doLogout(){sb.auth.signOut();}
