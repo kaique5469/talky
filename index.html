@@ -315,6 +315,7 @@ button,input,textarea,select{font-family:inherit;-webkit-appearance:none;appeara
 
 /* ── UTILS ── */
 .badge{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:100px;font-size:11px;font-weight:700}
+@keyframes spin{to{transform:rotate(360deg)}}
 .jd-map{height:200px;border-radius:14px;overflow:hidden;margin:0 24px 16px;border:1px solid var(--bd);position:relative}
 .jd-map-placeholder{height:200px;background:var(--sf2);border-radius:14px;margin:0 24px 16px;border:1px solid var(--bd);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;color:var(--mu);font-size:13px}
 .map-nav-btn{display:flex;align-items:center;justify-content:center;gap:6px;width:calc(100% - 48px);margin:0 24px 16px;padding:12px;background:var(--ac2);border:1px solid var(--ac3);border-radius:12px;color:var(--ac);font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font-head)}
@@ -1090,27 +1091,34 @@ function openJobDetail(id) {
 }
 
 function initJobMap(address){
+  if(window._jobMap){ try{window._jobMap.remove();}catch(e){} window._jobMap=null; }
   var container = document.getElementById('jd-map-container');
   if(!container) return;
-  container.className='jd-map';
-  container.id='jd-map-el';
-  // Geocode with Nominatim (OpenStreetMap)
-  fetch('https://nominatim.openstreetmap.org/search?format=json&q='+encodeURIComponent(address)+'&limit=1')
+  container.className = 'jd-map';
+  container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--mu);font-size:12px;gap:6px"><i class="ti ti-loader" style="animation:spin 1s linear infinite;font-size:18px"></i>Loading map...</div>';
+  fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(address),{headers:{'Accept-Language':'en'}})
     .then(function(r){return r.json();})
     .then(function(data){
-      if(!data||!data[0]){
+      if(!data||!data.length){
         container.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--mu);font-size:13px;flex-direction:column;gap:6px"><i class="ti ti-map-off" style="font-size:28px;opacity:.3"></i>Address not found</div>';
         return;
       }
       var lat=parseFloat(data[0].lat);
       var lon=parseFloat(data[0].lon);
-      if(window._jobMap){ window._jobMap.remove(); window._jobMap=null; }
-      var map=L.map('jd-map-el',{zoomControl:false,attributionControl:false}).setView([lat,lon],15);
-      window._jobMap=map;
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-      var icon=L.divIcon({html:'<div style="background:var(--ac);width:24px;height:24px;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center"><i class="ti ti-map-pin" style="color:#fff;font-size:12px"></i></div>',className:'',iconSize:[24,24],iconAnchor:[12,12]});
-      L.marker([lat,lon],{icon:icon}).addTo(map);
-      L.control.zoom({position:'bottomright'}).addTo(map);
+      container.innerHTML='';
+      var mapEl=document.createElement('div');
+      mapEl.id='leaflet-map';
+      mapEl.style.cssText='width:100%;height:100%';
+      container.appendChild(mapEl);
+      setTimeout(function(){
+        var map=L.map('leaflet-map',{zoomControl:true,attributionControl:false}).setView([lat,lon],15);
+        window._jobMap=map;
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
+        var markerHtml='<div style="background:#4f7cff;width:28px;height:28px;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 10px rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;font-size:13px">📍</div>';
+        var icon=L.divIcon({html:markerHtml,className:'',iconSize:[28,28],iconAnchor:[14,14]});
+        L.marker([lat,lon],{icon:icon}).addTo(map).bindPopup('<b>'+address+'</b>').openPopup();
+        map.invalidateSize();
+      },100);
     })
     .catch(function(){
       container.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--mu);font-size:13px">Map unavailable</div>';
