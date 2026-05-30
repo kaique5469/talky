@@ -315,6 +315,10 @@ button,input,textarea,select{font-family:inherit;-webkit-appearance:none;appeara
 
 /* ── UTILS ── */
 .badge{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:100px;font-size:11px;font-weight:700}
+.team-code{font-family:var(--font-head);font-size:22px;font-weight:800;letter-spacing:4px;color:var(--ac);text-align:center;padding:16px;background:var(--ac2);border-radius:14px;margin:8px 0}
+.member-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--bd)}
+.member-row:last-child{border-bottom:none}
+.member-av{width:32px;height:32px;border-radius:10px;background:var(--ac);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;color:#fff;flex-shrink:0}
 @keyframes spin{to{transform:rotate(360deg)}}
 .jd-map{height:200px;border-radius:14px;overflow:hidden;margin:0 24px 16px;border:1px solid var(--bd);position:relative}
 .jd-map-placeholder{height:200px;background:var(--sf2);border-radius:14px;margin:0 24px 16px;border:1px solid var(--bd);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;color:var(--mu);font-size:13px}
@@ -574,6 +578,7 @@ var GROQ_KEY = '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';
 
 // ── STATE ──
 var USER = null, CU = null, JOBS = [], INV_ITEMS = [], CHAT = [], curPage = 'home';
+var TEAM = null, TEAM_MEMBERS = [];
 var calMonth = new Date();
 var selectedDate = new Date(), jobEditId = null, jobType = 'cctv';
 
@@ -669,9 +674,28 @@ function saveProfile() {
 
 function loadAll() {
   document.getElementById('loading').style.display = 'flex';
-  sb.from('taskly_jobs').select('*').eq('user_id', CU.id).order('date', {ascending:true}).then(function(r){
-    JOBS = r.data || [];
-    initApp();
+  // Load team membership first
+  sb.from('taskly_team_members').select('*, taskly_teams(*)').eq('user_id', CU.id).then(function(tm){
+    var membership = tm.data && tm.data[0];
+    if(membership && membership.taskly_teams) {
+      TEAM = membership.taskly_teams;
+      // Load team members
+      sb.from('taskly_team_members').select('*, taskly_profiles(name)').eq('team_id', TEAM.id).then(function(m){
+        TEAM_MEMBERS = m.data || [];
+      });
+      // Load all team jobs
+      sb.from('taskly_jobs').select('*').eq('team_id', TEAM.id).order('date', {ascending:true}).then(function(r){
+        JOBS = r.data || [];
+        initApp();
+      });
+    } else {
+      TEAM = null;
+      // Load only personal jobs
+      sb.from('taskly_jobs').select('*').eq('user_id', CU.id).order('date', {ascending:true}).then(function(r){
+        JOBS = r.data || [];
+        initApp();
+      });
+    }
   });
 }
 
@@ -953,7 +977,7 @@ function saveJob() {
   var email=document.getElementById('nj-email').value.trim();
   var notes=document.getElementById('nj-notes').value.trim();
   if(!title||!date) return toast('Please add a title and date');
-  var data={user_id:CU.id,title:title,client_name:client,address:addr,date:date,time:time,duration:dur,value:val,deposit:deposit,balance:balance,client_email:email,notes:notes,job_type:jobType,pay_status:payStatus,status:'pending'};
+  var data={user_id:CU.id,team_id:TEAM?TEAM.id:null,title:title,client_name:client,address:addr,date:date,time:time,duration:dur,value:val,deposit:deposit,balance:balance,client_email:email,notes:notes,job_type:jobType,pay_status:payStatus,status:'pending'};
   if(jobEditId) {
     sb.from('taskly_jobs').update(data).eq('id',jobEditId).select().then(function(r){
       if(!r.error&&r.data){
@@ -1495,8 +1519,72 @@ function renderProfile() {
     '<div class="prof-item" onclick="navTo(\'financial\')"><div class="prof-item-ico" style="background:var(--gr2);color:var(--gr)"><i class="ti ti-chart-bar"></i></div><div class="prof-item-body"><div class="prof-item-name">Financial Report</div><div class="prof-item-sub">Earnings and job stats</div></div><i class="ti ti-chevron-right"></i></div>'+
     '</div>'+
     '<div class="prof-section">'+
+    '<div style="padding:16px"><div style="font-size:11px;font-weight:700;color:var(--mu);letter-spacing:.5px;text-transform:uppercase;margin-bottom:12px"><i class="ti ti-users" style="margin-right:4px"></i>Team</div>'+
+    (TEAM ?
+      '<div style="font-size:13px;color:var(--mu);margin-bottom:8px">Team: <b style="color:var(--tx)">'+esc(TEAM.name)+'</b></div>'+
+      '<div style="font-size:12px;color:var(--mu);margin-bottom:6px">Invite code — share with your partner:</div>'+
+      '<div class="team-code">'+esc(TEAM.invite_code)+'</div>'+
+      '<div style="font-size:12px;color:var(--mu);margin-top:12px;margin-bottom:8px">Members ('+TEAM_MEMBERS.length+'):</div>'+
+      TEAM_MEMBERS.map(function(m){
+        var n=(m.taskly_profiles&&m.taskly_profiles.name)||'Member';
+        var isMe=m.user_id===CU.id;
+        return '<div class="member-row"><div class="member-av">'+n[0].toUpperCase()+'</div><div style="flex:1;font-size:13px;font-weight:600">'+esc(n)+(isMe?' <span style=\"color:var(--mu);font-weight:400\">(you)</span>':'')+'</div></div>';
+      }).join('')+
+      '<button onclick="leaveTeam()" style="width:100%;margin-top:12px;padding:10px;background:var(--rd2);color:var(--rd);border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font-head)">Leave Team</button>'
+    :
+      '<div style="font-size:13px;color:var(--mu);margin-bottom:12px">Create a team to share jobs with your partner.</div>'+
+      '<div style="display:flex;gap:8px;margin-bottom:8px">'+
+      '<input id="team-name-inp" placeholder="Team name" style="flex:1;padding:10px 12px;background:var(--sf2);border:1.5px solid var(--bd2);border-radius:10px;color:var(--tx);font-size:13px;outline:none;font-family:inherit">'+
+      '<button onclick="createTeam()" style="padding:10px 16px;background:var(--ac);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font-head)">Create</button>'+
+      '</div>'+
+      '<div style="font-size:12px;color:var(--mu);text-align:center;margin:8px 0">— or —</div>'+
+      '<div style="display:flex;gap:8px">'+
+      '<input id="team-code-inp" placeholder="Enter invite code" style="flex:1;padding:10px 12px;background:var(--sf2);border:1.5px solid var(--bd2);border-radius:10px;color:var(--tx);font-size:13px;outline:none;font-family:inherit;letter-spacing:2px;text-transform:uppercase">'+
+      '<button onclick="joinTeam()" style="padding:10px 16px;background:var(--gr);color:#0a1a10;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font-head)">Join</button>'+
+      '</div>'
+    )+
+    '</div></div>'+
+    '<div class="prof-section">'+
     '<div class="prof-item" onclick="doLogout()"><div class="prof-item-ico" style="background:var(--rd2);color:var(--rd)"><i class="ti ti-logout"></i></div><div class="prof-item-body"><div class="prof-item-name" style="color:var(--rd)">Sign Out</div><div class="prof-item-sub">'+( CU&&CU.email||'')+'</div></div></div>'+
     '</div>';
+}
+
+function createTeam(){
+  var name=document.getElementById('team-name-inp').value.trim();
+  if(!name) return toast('Enter a team name');
+  sb.from('taskly_teams').insert({name:name,owner_id:CU.id}).select().then(function(r){
+    if(r.error) return toast('Error creating team');
+    var team=r.data[0];
+    sb.from('taskly_team_members').insert({team_id:team.id,user_id:CU.id,role:'owner'}).then(function(){
+      TEAM=team;
+      toast('Team created! Share the code with your partner.');
+      loadAll();
+    });
+  });
+}
+
+function joinTeam(){
+  var code=document.getElementById('team-code-inp').value.trim().toUpperCase();
+  if(!code) return toast('Enter the invite code');
+  sb.from('taskly_teams').select('*').eq('invite_code',code).single().then(function(r){
+    if(r.error||!r.data) return toast('Team not found. Check the code.');
+    var team=r.data;
+    sb.from('taskly_team_members').insert({team_id:team.id,user_id:CU.id,role:'member'}).then(function(m){
+      if(m.error) return toast('Could not join team. Maybe already a member?');
+      TEAM=team;
+      toast('Joined team '+team.name+'!');
+      loadAll();
+    });
+  });
+}
+
+function leaveTeam(){
+  if(!confirm('Leave this team?')) return;
+  sb.from('taskly_team_members').delete().eq('team_id',TEAM.id).eq('user_id',CU.id).then(function(){
+    TEAM=null; TEAM_MEMBERS=[];
+    toast('Left the team');
+    loadAll();
+  });
 }
 
 function doLogout(){sb.auth.signOut();}
