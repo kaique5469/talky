@@ -683,9 +683,18 @@ function loadAll() {
       sb.from('taskly_team_members').select('*, taskly_profiles(name)').eq('team_id', TEAM.id).then(function(m){
         TEAM_MEMBERS = m.data || [];
       });
-      // Load all team jobs
-      sb.from('taskly_jobs').select('*').eq('team_id', TEAM.id).order('date', {ascending:true}).then(function(r){
-        JOBS = r.data || [];
+      // Load team jobs + personal jobs
+      Promise.all([
+        sb.from('taskly_jobs').select('*').eq('team_id', TEAM.id).order('date', {ascending:true}),
+        sb.from('taskly_jobs').select('*').eq('user_id', CU.id).is('team_id', null).order('date', {ascending:true})
+      ]).then(function(results){
+        var teamJobs = results[0].data || [];
+        var personalJobs = results[1].data || [];
+        // Merge and deduplicate by id
+        var allJobs = teamJobs.concat(personalJobs);
+        var seen = {};
+        JOBS = allJobs.filter(function(j){ if(seen[j.id]) return false; seen[j.id]=true; return true; });
+        JOBS.sort(function(a,b){ return a.date.localeCompare(b.date); });
         initApp();
       });
     } else {
